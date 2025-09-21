@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>RAG Console — Minimal UI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Tailwind (optionnel) : retire cette ligne si tu veux zéro CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Curseur "génératif" clignotant */
+    @keyframes blink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
+    .caret::after { content: "▍"; animation: blink 1s step-end infinite; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+  <!-- Bandeau de statut (affiché pendant les requêtes) -->
+  <div id="statusBar" class="fixed top-3 right-3 z-50 hidden">
+    <div class="flex items-center gap-2 rounded-xl bg-slate-900 text-white px-3 py-2 shadow-lg">
+      <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="white" stroke-width="4"></circle>
+        <path class="opacity-75" fill="white" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+      </svg>
+      <span id="statusText" class="text-sm">…</span>
+    </div>
+  </div>
+
+  <div class="max-w-3xl mx-auto p-6 space-y-6">
+    <header class="flex items-center justify-between">
+      <h1 class="text-xl font-semibold">RAG Console — Minimal</h1>
+      <div class="text-sm">
+        <span id="status-ollama" class="px-2 py-0.5 rounded-full border">Ollama: ?</span>
+        <span id="status-qdrant" class="px-2 py-0.5 rounded-full border ml-2">Qdrant: ?</span>
+      </div>
+    </header>
+
+    <section class="rounded-2xl border bg-white p-4 space-y-3">
+      <div class="grid gap-3 sm:grid-cols-3">
+        <label class="text-xs text-slate-500">API Base URL
+          <input id="baseUrl" class="mt-1 w-full rounded-xl border px-3 py-2"
+                 value="http://localhost:8080" />
+        </label>
+        <label class="text-xs text-slate-500">Collection
+          <input id="collection" class="mt-1 w-full rounded-xl border px-3 py-2 bg-slate-50" readonly />
+        </label>
+        <div class="flex items-end">
+          <button id="btnHealth" class="w-full rounded-xl border px-3 py-2 hover:bg-slate-50 flex items-center justify-center gap-2">
+            <span class="inline-flex items-center gap-2">
+              <span id="spinHealth" class="hidden w-4 h-4 border-2 border-slate-300 border-t-slate-900 rounded-full animate-spin"></span>
+              Rafraîchir santé
+            </span>
+          </button>
+        </div>
+      </div>
+      <div class="text-xs text-slate-500">Embedding dim: <span id="emb-dim">?</span> · LLM: <span id="llm">?</span></div>
+    </section>
+
+    <section class="grid gap-6 sm:grid-cols-3">
+      <div class="rounded-2xl border bg-white p-4 sm:col-span-2 space-y-3">
+        <label class="text-sm font-medium">Poser une question</label>
+        <textarea id="question" rows="3" class="w-full rounded-xl border px-3 py-2 resize-none">Quel est le CPA moyen mentionné ?</textarea>
+        <div class="flex items-center justify-between">
+          <div class="text-xs text-slate-500">Astuce: utilisez des mots présents dans vos docs (CAC, CPA, etc.).</div>
+          <button id="btnAsk" class="rounded-xl bg-slate-900 text-white px-3 py-2 flex items-center gap-2">
+            <span id="spinAsk" class="hidden w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></span>
+            Demander
+          </button>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border bg-white p-4 space-y-3">
+        <div class="text-sm font-medium">Ingestion</div>
+        <p class="text-sm text-slate-600">Placez vos <code>.txt</code>/<code>.md</code> dans <code>./data</code> puis lancez.</p>
+        <button id="btnIngest" class="w-full rounded-xl border px-3 py-2 hover:bg-slate-50 flex items-center justify-center gap-2">
+          <span id="spinIngest" class="hidden w-4 h-4 border-2 border-slate-300 border-t-slate-900 rounded-full animate-spin"></span>
+          Lancer l’ingestion
+        </button>
+        <div id="ingestInfo" class="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl p-2 hidden"></div>
+      </div>
+    </section>
+
+    <section class="grid gap-6 sm:grid-cols-3">
+      <div class="rounded-2xl border bg-white p-4 sm:col-span-2">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-sm font-medium">Réponse</div>
+          <div class="text-xs text-slate-500" id="modelName">—</div>
+        </div>
+        <div id="error" class="hidden text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-xl p-3"></div>
+
+        <!-- Skeleton / état “génération” -->
+        <div id="answerSkeleton" class="hidden space-y-2">
+          <div class="h-3 w-2/3 bg-slate-200 rounded animate-pulse"></div>
+          <div class="h-3 w-4/5 bg-slate-200 rounded animate-pulse"></div>
+          <div class="h-3 w-3/5 bg-slate-200 rounded animate-pulse"></div>
+        </div>
+
+        <!-- Réponse texte avec curseur -->
+        <pre id="answer" class="whitespace-pre-wrap text-sm text-slate-800"></pre>
+      </div>
+
+      <div class="rounded-2xl border bg-white p-4">
+        <div class="text-sm font-medium mb-2">Sources (top-k)</div>
+        <div id="sources" class="space-y-2 text-sm text-slate-700"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const statusBar = $('statusBar');
+    const statusText = $('statusText');
+
+    function safeUrl(base) { return base.replace(/\/$/, ''); }
+
+    // --- Helpers UI (loaders) ---
+    function showStatus(text) {
+      statusText.textContent = text;
+      statusBar.classList.remove('hidden');
+    }
+    function hideStatus() {
+      statusBar.classList.add('hidden');
+    }
+    function setButtonLoading(btnId, spinnerId, isLoading) {
+      const btn = $(btnId);
+      const sp = $(spinnerId);
+      if (!btn || !sp) return;
+      btn.disabled = isLoading;
+      if (isLoading) sp.classList.remove('hidden'); else sp.classList.add('hidden');
+      btn.classList.toggle('opacity-60', isLoading);
+      btn.classList.toggle('cursor-not-allowed', isLoading);
+    }
+    function startAnswerSkeleton(label = "Génération en cours…") {
+      $('error').classList.add('hidden');
+      $('answer').textContent = '';
+      $('answer').classList.add('caret'); // curseur clignotant
+      $('answerSkeleton').classList.remove('hidden');
+      showStatus(label);
+    }
+    function stopAnswerSkeleton() {
+      $('answerSkeleton').classList.add('hidden');
+      $('answer').classList.remove('caret');
+      hideStatus();
+    }
+
+    async function jsonFetch(url, opts) {
+      const res = await fetch(url, opts);
+      const text = await res.text();
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; } catch { throw new Error(text || res.statusText); }
+      if (!res.ok) throw new Error(data.detail || data.message || text || ('HTTP ' + res.status));
+      return data;
+    }
+
+    async function refreshHealth() {
+      const base = safeUrl($('baseUrl').value);
+      // Loader UI
+      setButtonLoading('btnHealth', 'spinHealth', true);
+      showStatus('Vérification de santé…');
+      try {
+        const h = await jsonFetch(base + '/health');
+        $('status-ollama').textContent = 'Ollama: ' + h.ollama;
+        $('status-qdrant').textContent = 'Qdrant: ' + h.qdrant;
+        $('emb-dim').textContent = h.embedding_dim;
+        $('llm').textContent = h.generation_model;
+        $('collection').value = h.collection;
+        $('modelName').textContent = h.generation_model;
+        $('status-ollama').className = 'px-2 py-0.5 rounded-full border ' + (String(h.ollama).startsWith('ok') ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200');
+        $('status-qdrant').className = 'px-2 py-0.5 rounded-full border ' + (String(h.qdrant).startsWith('ok') ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200');
+      } catch (e) {
+        $('status-ollama').textContent = 'Ollama: err';
+        $('status-qdrant').textContent = 'Qdrant: err';
+        $('emb-dim').textContent = '?';
+        $('llm').textContent = '?';
+        $('collection').value = '-';
+        $('error').textContent = e.message || String(e);
+        $('error').classList.remove('hidden');
+      } finally {
+        setButtonLoading('btnHealth', 'spinHealth', false);
+        hideStatus();
+      }
+    }
+
+    async function ingest() {
+      const base = safeUrl($('baseUrl').value);
+      $('ingestInfo').classList.add('hidden');
+      $('error').classList.add('hidden');
+      setButtonLoading('btnIngest', 'spinIngest', true);
+      showStatus('Ingestion en cours… (création d\'embeddings et indexation)');
+      try {
+        const data = await jsonFetch(base + '/ingest', { method: 'POST' });
+        $('ingestInfo').textContent = `Indexés: ${data.files_indexed} | Collection: ${data.collection} | dim: ${data.embedding_dim}`;
+        $('ingestInfo').classList.remove('hidden');
+        await refreshHealth();
+      } catch (e) {
+        $('error').textContent = e.message || String(e);
+        $('error').classList.remove('hidden');
+      } finally {
+        setButtonLoading('btnIngest', 'spinIngest', false);
+        hideStatus();
+      }
+    }
+
+    async function ask_stream() {
+    const base = safeUrl($('baseUrl').value);
+    const q = $('question').value || '';
+    $('sources').innerHTML = '';
+    $('error').classList.add('hidden');
+    setButtonLoading('btnAsk', 'spinAsk', true);
+    startAnswerSkeleton('Streaming… (recherche + génération)');
+
+    try {
+      const url = new URL(base + '/ask_stream');
+      url.searchParams.set('q', q);
+
+      // EventSource (SSE) — nécessite que l’API soit accessible sans headers custom
+      const es = new EventSource(url.toString());
+      $('answer').textContent = ''; // on repart de zéro
+
+      es.addEventListener('token', (evt) => {
+        const { delta } = JSON.parse(evt.data);
+        if (delta) $('answer').textContent += delta;
+      });
+
+      es.addEventListener('done', (evt) => {
+        stopAnswerSkeleton();
+        const { sources } = JSON.parse(evt.data || '{}');
+        (sources || []).forEach(s => {
+          const div = document.createElement('div');
+          div.className = 'flex items-center justify-between rounded-xl border p-2';
+          div.innerHTML = `<span class="font-mono truncate" title="${s.path}">${s.path}</span>
+                           <span class="text-xs text-slate-500">score ${Number(s.score).toFixed(3)}</span>`;
+          $('sources').appendChild(div);
+        });
+        es.close();
+        setButtonLoading('btnAsk', 'spinAsk', false);
+      });
+
+      es.addEventListener('error', (evt) => {
+        stopAnswerSkeleton();
+        $('error').textContent = 'Erreur streaming';
+        $('error').classList.remove('hidden');
+        es.close();
+        setButtonLoading('btnAsk', 'spinAsk', false);
+      });
+    } catch (e) {
+      stopAnswerSkeleton();
+      $('error').textContent = e.message || String(e);
+      $('error').classList.remove('hidden');
+      setButtonLoading('btnAsk', 'spinAsk', false);
+    }
+  }
+
+  // Remplacer le binding :
+  // $('btnAsk').addEventListener('click', ask);
+  $('btnAsk').addEventListener('click', ask_stream);
+  
+    // Bind UI
+    $('btnHealth').addEventListener('click', refreshHealth);
+    $('btnIngest').addEventListener('click', ingest);
+    $('btnAsk').addEventListener('click', ask);
+
+    // First load
+    refreshHealth();
+  </script>
+</body>
+</html>
