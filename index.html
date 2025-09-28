@@ -37,7 +37,7 @@
       <div class="grid gap-3 sm:grid-cols-3">
         <label class="text-xs text-slate-500">API Base URL
           <input id="baseUrl" class="mt-1 w-full rounded-xl border px-3 py-2"
-                 value="https://rdv-mada.online:8080" />
+                 value="https://rag.rdv-mada.online" />
         </label>
         <label class="text-xs text-slate-500">Collection
           <input id="collection" class="mt-1 w-full rounded-xl border px-3 py-2 bg-slate-50" readonly />
@@ -152,7 +152,6 @@
 
     async function refreshHealth() {
       const base = safeUrl($('baseUrl').value);
-      // Loader UI
       setButtonLoading('btnHealth', 'spinHealth', true);
       showStatus('Vérification de santé…');
       try {
@@ -200,65 +199,80 @@
     }
 
     async function ask_stream() {
-    const base = safeUrl($('baseUrl').value);
-    const q = $('question').value || '';
-    $('sources').innerHTML = '';
-    $('error').classList.add('hidden');
-    setButtonLoading('btnAsk', 'spinAsk', true);
-    startAnswerSkeleton('Streaming… (recherche + génération)');
+      const base = safeUrl($('baseUrl').value);
+      const q = $('question').value || '';
+      $('sources').innerHTML = '';
+      $('error').classList.add('hidden');
+      setButtonLoading('btnAsk', 'spinAsk', true);
+      startAnswerSkeleton('Streaming… (recherche + génération)');
 
-    try {
-      const url = new URL(base + '/ask_stream');
-      url.searchParams.set('q', q);
+      try {
+        const url = new URL(base + '/ask_stream');
+        url.searchParams.set('q', q);
 
-      // EventSource (SSE) — nécessite que l’API soit accessible sans headers custom
-      const es = new EventSource(url.toString());
-      $('answer').textContent = ''; // on repart de zéro
+        // EventSource (SSE)
+        const es = new EventSource(url.toString());
+        $('answer').textContent = '';
 
-      es.addEventListener('token', (evt) => {
-        const { delta } = JSON.parse(evt.data);
-        if (delta) $('answer').textContent += delta;
-      });
-
-      es.addEventListener('done', (evt) => {
-        stopAnswerSkeleton();
-        const { sources } = JSON.parse(evt.data || '{}');
-        (sources || []).forEach(s => {
-          const div = document.createElement('div');
-          div.className = 'flex items-center justify-between rounded-xl border p-2';
-          div.innerHTML = `<span class="font-mono truncate" title="${s.path}">${s.path}</span>
-                           <span class="text-xs text-slate-500">score ${Number(s.score).toFixed(3)}</span>`;
-          $('sources').appendChild(div);
+        es.addEventListener('token', (evt) => {
+          const { delta } = JSON.parse(evt.data);
+          if (delta) $('answer').textContent += delta;
         });
-        es.close();
-        setButtonLoading('btnAsk', 'spinAsk', false);
-      });
 
-      es.addEventListener('error', (evt) => {
+        es.addEventListener('done', (evt) => {
+          stopAnswerSkeleton();
+          const { sources } = JSON.parse(evt.data || '{}');
+          (sources || []).forEach(s => {
+            const div = document.createElement('div');
+            div.className = 'flex items-center justify-between rounded-xl border p-2';
+            div.innerHTML = `<span class="font-mono truncate" title="${s.path}">${s.path}</span>
+                             <span class="text-xs text-slate-500">score ${Number(s.score).toFixed(3)}</span>`;
+            $('sources').appendChild(div);
+          });
+          es.close();
+          setButtonLoading('btnAsk', 'spinAsk', false);
+        });
+
+        es.addEventListener('error', () => {
+          stopAnswerSkeleton();
+          $('error').textContent = 'Erreur streaming';
+          $('error').classList.remove('hidden');
+          es.close();
+          setButtonLoading('btnAsk', 'spinAsk', false);
+        });
+      } catch (e) {
         stopAnswerSkeleton();
-        $('error').textContent = 'Erreur streaming';
+        $('error').textContent = e.message || String(e);
         $('error').classList.remove('hidden');
-        es.close();
         setButtonLoading('btnAsk', 'spinAsk', false);
-      });
-    } catch (e) {
-      stopAnswerSkeleton();
-      $('error').textContent = e.message || String(e);
-      $('error').classList.remove('hidden');
-      setButtonLoading('btnAsk', 'spinAsk', false);
+      }
     }
-  }
 
-  // Remplacer le binding :
-  // $('btnAsk').addEventListener('click', ask);
-  $('btnAsk').addEventListener('click', ask_stream);
-  
+    // --- Auto-default: s'assure que l'URL API est bien en https si la page est en https
+    function ensureDefaultBaseUrl() {
+      const input = $('baseUrl');
+      const current = (input.value || '').trim();
+      if (!current) {
+        input.value = 'https://rag.rdv-mada.online';
+      }
+      try {
+        const u = new URL(input.value);
+        if (location.protocol === 'https:' && u.protocol === 'http:') {
+          u.protocol = 'https:';
+          input.value = u.toString();
+        }
+      } catch {}
+    }
+
     // Bind UI
     $('btnHealth').addEventListener('click', refreshHealth);
     $('btnIngest').addEventListener('click', ingest);
-    $('btnAsk').addEventListener('click', ask);
+    // Utiliser le streaming SSE
+    $('btnAsk').addEventListener('click', ask_stream);
+    // ⚠️ Ne pas lier une fonction "ask" inexistante.
 
     // First load
+    ensureDefaultBaseUrl();
     refreshHealth();
   </script>
 </body>
